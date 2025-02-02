@@ -1,33 +1,40 @@
 import React, { useState, useEffect, useRef } from 'react';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:4000';
 
 function ShaderGenerator() {
   const [prompt, setPrompt] = useState('');
-  const [shaderCode, setShaderCode] = useState('');
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const canvasRef = useRef(null);
 
-  // Default shader code
-  const defaultShader = `
-    // Vertex Shader
-    attribute vec4 a_position;
+  // Fixed vertex shader that never changes
+  const vertexShaderSource = `
+    attribute vec2 position;
     void main() {
-      gl_Position = a_position;
+      gl_Position = vec4(position, 0.0, 1.0);
     }
-    
-    // Fragment Shader
+  `;
+
+  const defaultFragmentShader = `
     precision mediump float;
     void main() {
       gl_FragColor = vec4(1.0, 0.0, 0.0, 1.0);
     }
   `;
 
+  // Remove shaderCode state and only use fragmentShader
+  const [fragmentShader, setFragmentShader] = useState(defaultFragmentShader);
+  let animationFrameId;
+
   useEffect(() => {
-    // Initialize with default shader
-    initWebGL(defaultShader);
-  }, []);
+    initWebGL(fragmentShader);
+    return () => {
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+    };
+  }, [fragmentShader]);
 
   const generateShader = async () => {
     setIsLoading(true);
@@ -43,19 +50,18 @@ function ShaderGenerator() {
       });
 
       const data = await response.json();
-      console.log('Server response:', data);
+      console.log('Raw shader response:', data.shader_code); // Debug log
       
       if (response.ok) {
         if (!data.shader_code) {
           setError('Server response missing shader code');
           return;
         }
-        setShaderCode(data.shader_code);
-        try {
-          initWebGL(data.shader_code);
-        } catch (err) {
-          setError(`WebGL Error: ${err.message}`);
-        }
+
+        // Extract only the fragment shader part if both are present
+        const fragmentOnly = data.shader_code.split('// Fragment Shader')[1] || data.shader_code;
+        setFragmentShader(fragmentOnly.trim());
+
       } else {
         setError(data.error || 'Failed to generate shader');
       }
@@ -67,7 +73,7 @@ function ShaderGenerator() {
     }
   };
 
-  const initWebGL = (shaderSource) => {
+  const initWebGL = (fsSource) => {
     const canvas = canvasRef.current;
     const gl = canvas.getContext('webgl');
     
@@ -76,63 +82,78 @@ function ShaderGenerator() {
       return;
     }
 
-    // Split shader source into vertex and fragment shaders
-    const [vertexSource, fragmentSource] = shaderSource.split('// Fragment Shader');
-    
-    // Create shader program
-    const program = createShaderProgram(gl, vertexSource, fragmentSource);
+    // Always use the fixed vertex shader
+    const program = createProgram(gl, vertexShaderSource, fsSource);
     if (!program) return;
-    
+
+    // Set up a full-screen quad
+    const positions = new Float32Array([
+      -1, -1,
+       1, -1,
+      -1,  1,
+       1,  1
+    ]);
+
+    const buffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+    gl.bufferData(gl.ARRAY_BUFFER, positions, gl.STATIC_DRAW);
+
+    // Set up attributes and uniforms
+    const positionLocation = gl.getAttribLocation(program, 'position');
+    const resolutionLocation = gl.getUniformLocation(program, 'resolution');
+    const timeLocation = gl.getUniformLocation(program, 'time');
+
     gl.useProgram(program);
+    gl.enableVertexAttribArray(positionLocation);
+    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
 
-    // Create a square
-    const positions = [
-      -1.0, -1.0,
-       1.0, -1.0,
-      -1.0,  1.0,
-       1.0,  1.0,
-    ];
+    // Animation loop
+    let startTime = Date.now();
+    function render() {
+      const time = (Date.now() - startTime) * 0.001; // time in seconds
+      
+      gl.viewport(0, 0, canvas.width, canvas.height);
+      gl.useProgram(program);
+      
+      if (resolutionLocation) {
+        gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+      }
+      if (timeLocation) {
+        gl.uniform1f(timeLocation, time);
+      }
 
-    // Create and bind buffer
-    const positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
-
-    // Set up attribute
-    const positionAttributeLocation = gl.getAttribLocation(program, "a_position");
-    gl.enableVertexAttribArray(positionAttributeLocation);
-    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
-
-    // Draw
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      animationFrameId = requestAnimationFrame(render);
+    }
+    render();
   };
 
-  function createShaderProgram(gl, vsSource, fsSource) {
-    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+  function createProgram(gl, vsSource, fsSource) {
+    const program = gl.createProgram();
+    const vertexShader = compileShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    
     if (!vertexShader || !fragmentShader) return null;
 
-    const program = gl.createProgram();
     gl.attachShader(program, vertexShader);
     gl.attachShader(program, fragmentShader);
     gl.linkProgram(program);
 
     if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-      console.error('Unable to initialize shader program:', gl.getProgramInfoLog(program));
+      setError(`Link error: ${gl.getProgramInfoLog(program)}`);
       return null;
     }
 
     return program;
   }
 
-  function createShader(gl, type, source) {
+  function compileShader(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
 
     if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-      console.error('Shader compile error:', gl.getShaderInfoLog(shader));
+      setError(`Compile error: ${gl.getShaderInfoLog(shader)}`);
       gl.deleteShader(shader);
       return null;
     }
@@ -171,11 +192,32 @@ function ShaderGenerator() {
           </div>
         )}
 
-        {shaderCode && (
-          <pre className="shader-code">
-            {shaderCode}
-          </pre>
-        )}
+        <div style={{ marginTop: '1rem' }}>
+          <h3>Fragment Shader</h3>
+          <textarea
+            className="shader-code"
+            value={fragmentShader}
+            onChange={(e) => {
+              const newCode = e.target.value;
+              setFragmentShader(newCode);
+              try {
+                initWebGL(newCode);
+              } catch (err) {
+                setError(`WebGL Error: ${err.message}`);
+              }
+            }}
+            rows={15}
+            spellCheck="false"
+            style={{
+              fontFamily: 'monospace',
+              width: '100%',
+              backgroundColor: '#1e1e1e',
+              color: '#d4d4d4',
+              padding: '1rem',
+              border: '1px solid #333'
+            }}
+          />
+        </div>
       </div>
     </div>
   );
