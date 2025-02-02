@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:4000';
+
 function ShaderGenerator() {
   const [prompt, setPrompt] = useState('');
   const [shaderCode, setShaderCode] = useState('');
@@ -32,7 +34,7 @@ function ShaderGenerator() {
     setError(null);
     
     try {
-      const response = await fetch('http://localhost:4000/api/generate_shader', {
+      const response = await fetch(`${API_URL}/api/generate_shader`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -41,15 +43,25 @@ function ShaderGenerator() {
       });
 
       const data = await response.json();
+      console.log('Server response:', data);
       
       if (response.ok) {
+        if (!data.shader_code) {
+          setError('Server response missing shader code');
+          return;
+        }
         setShaderCode(data.shader_code);
-        initWebGL(data.shader_code);
+        try {
+          initWebGL(data.shader_code);
+        } catch (err) {
+          setError(`WebGL Error: ${err.message}`);
+        }
       } else {
         setError(data.error || 'Failed to generate shader');
       }
     } catch (err) {
-      setError('Failed to connect to the server');
+      console.error('Server error:', err);
+      setError(`Failed to connect to server: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -134,7 +146,7 @@ function ShaderGenerator() {
         <textarea
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
-          placeholder="Describe the shader you want (e.g., 'A rotating cube with a gradient background')"
+          placeholder="Describe the shader you want (e.g., 'A rotating cube with a gradient background') or 'test shader' to check if the server is working"
           rows={4}
         />
         <button 
