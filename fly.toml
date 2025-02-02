@@ -9,6 +9,9 @@ primary_region = 'sin'
 [build]
   dockerfile = 'Dockerfile'
 
+[env]
+  VITE_API_URL = "https://shader-llm-api.fly.dev"
+
 [http_service]
   internal_port = 80
   force_https = true

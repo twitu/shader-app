@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "react-scripts build",
+    "build": "REACT_APP_API_URL=https://shader-llm-api.fly.dev react-scripts build",
+    "build:local": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
     "setup": "cd ../wasm-calculator && wasm-pack build --target web && cd ../wasm-calculator-app && npm link ../wasm-calculator/pkg"
@@ -32,9 +33,5 @@
       "last 1 firefox version",
       "last 1 safari version"
     ]
-  },
-  "devDependencies": {
-    "vite-plugin-wasm": "^3.3.0",
-    "vite-plugin-top-level-await": "^1.4.1"
   }
 }
