@@ -14,7 +14,7 @@
     "build:local": "react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "setup": "cd wasm-calculator && wasm-pack build --target web && cd .. && npm link wasm-calculator/pkg"
+    "setup": "cd wasm-calculator && wasm-pack build --target web && cd .. && npm install ./wasm-calculator/pkg"
   },
   "eslintConfig": {
     "extends": [
